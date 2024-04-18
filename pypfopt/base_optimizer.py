@@ -366,40 +366,56 @@ class BaseConvexOptimizer(BaseOptimizer):
     def add_sector_constraints(self, sector_mapper, sector_lower, sector_upper):
         """
         Adds constraints on the sum of weights of different groups of assets.
-        Most commonly, these will be sector constraints e.g portfolio's exposure to
-        tech must be less than x%::
+        Most commonly, these will be sector constraints; e.g portfolio's exposure to
+        Tech must be less than x%:
 
             sector_mapper = {
-                "GOOG": "tech",
-                "FB": "tech",,
+                "GOOG": ["Tech", "FAANG"],
+                "FB": ["Tech","FAANG"],
+                "TSLA": "Tech",
                 "XOM": "Oil/Gas",
                 "RRC": "Oil/Gas",
                 "MA": "Financials",
                 "JPM": "Financials",
             }
 
-            sector_lower = {"tech": 0.1}  # at least 10% to tech
+            sector_lower = {"Tech": 0.1}  # At least 10% to Tech.
             sector_upper = {
-                "tech": 0.4, # less than 40% tech
-                "Oil/Gas": 0.1 # less than 10% oil and gas
+                "Tech": 0.4,  # Less than 40% Tech.
+                "Oil/Gas": 0.1,  # Less than 10% oil and gas.
+                "FAANG": 0.25,  # Less than 25% to FAANG companies.
             }
 
         :param sector_mapper: dict that maps tickers to sectors
-        :type sector_mapper: {str: str} dict
+        :type sector_mapper: {str: str | list[str]} dict
         :param sector_lower: lower bounds for each sector
         :type sector_lower: {str: float} dict
         :param sector_upper: upper bounds for each sector
-        :type sector_upper: {str:float} dict
+        :type sector_upper: {str: float} dict
         """
         if np.any(self._lower_bounds < 0):
             warnings.warn(
                 "Sector constraints may not produce reasonable results if shorts are allowed."
             )
-        for sector in sector_upper:
-            is_sector = [sector_mapper.get(t) == sector for t in self.tickers]
+
+        # Checks type validity of entries in sector_mapper.
+        for sector in sector_mapper.keys():
+            val = sector_mapper[sector]
+            if isinstance(val, str):
+                sector_mapper[sector] = list(val)  # Ensure all values are list[str].
+            elif isinstance(val, list):
+                for v in val:
+                    if not isinstance(v, str):
+                        raise TypeError(f"Invalid type: {type(v)} in list for sector: {sector}.")
+            else:
+                raise TypeError(f"Invalid type: {type(val)} - for sector :{sector}, in sector_mapper.")
+     
+        # Creates membership mask and applies constraint for each sector upper and lower.
+        for sector in sector_upper.keys():
+            is_sector = [sector in sector_mapper.get(t) if isinstance(sector_mapper.get(t), list) else False for t in self.tickers]
             self.add_constraint(lambda w: cp.sum(w[is_sector]) <= sector_upper[sector])
-        for sector in sector_lower:
-            is_sector = [sector_mapper.get(t) == sector for t in self.tickers]
+        for sector in sector_lower.keys():
+            is_sector = [sector in sector_mapper.get(t) if isinstance(sector_mapper.get(t), list) else False for t in self.tickers]
             self.add_constraint(lambda w: cp.sum(w[is_sector]) >= sector_lower[sector])
 
     def convex_objective(self, custom_objective, weights_sum_to_one=True, **kwargs):
